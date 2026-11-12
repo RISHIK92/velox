@@ -70,6 +70,9 @@ var languages = map[string]Language{
 		Image: images["python"].Image,
 		Main:  "main.py",
 		Run:   "python3 -I -S /code/main.py",
+		// A large allocation can be refused before the cgroup's OOM killer acts: Python
+		// then raises MemoryError and exits 1, which is still the memory limit.
+		OutOfMemory: "MemoryError",
 	},
 	// Interval's web base. TypeScript runs through Node 22's type
 	// stripping, with no compiler.
