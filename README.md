@@ -29,8 +29,10 @@ Core Go application logic.
 
 Velox also judges Interval's jobs, in Interval's `JudgeJob`/`JudgeResult` contract:
 
-- `POST /judge` (API-key scope `submit`) queues a job at its priority (ranked, rooms, casual, run) and returns `202 {"id": …}`. A job outside the contract gets 400.
-- `GET /judge/{id}` (scope `status`) returns the `JudgeResult`, or 404 while the job is pending.
+- Only API keys whose IDs the operator lists in the API's `JUDGE_API_KEY_IDS` may use them. It's comma-separated and set in `.env`, which the `api` service loads. With none listed, `/judge` is closed.
+- `POST /judge` queues a job at its priority (ranked, rooms, casual, run) and returns `202 {"id": …}`. A job outside the contract gets 400.
+- `POST /judge` answers 409 for an id another key holds and 503 when its queue is full.
+- `GET /judge/{id}` returns the `JudgeResult`, or 404 while the job is pending or when another key submitted it.
 
 The `judge-worker` service (`backend/cmd/exec serve`) takes those jobs. Each run gets a fresh, locked-down container on the host's Docker:
 

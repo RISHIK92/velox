@@ -22,7 +22,7 @@ func integration(t *testing.T) {
 	}
 }
 
-// The suite against services/exec. EXEC_INTEGRATION=1 runs it (Docker); `pnpm redteam`
+// The suite against Velox's engine. EXEC_INTEGRATION=1 runs it (Docker; docs/runbooks/redteam.md);
 // sets it.
 func TestExecEngineContainsEveryAttack(t *testing.T) {
 	integration(t)

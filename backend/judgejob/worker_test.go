@@ -19,12 +19,13 @@ import (
 	"github.com/rishik92/velox/engine"
 )
 
-// P5-W30-S05: the queue and the pool against a real Valkey (the local one, or
-// VALKEY_URL), with a fake sandbox. Skipped without a Valkey.
+// The queue and the pool against a real Redis or Valkey (a local one on 6379, or
+// VALKEY_URL), with a fake sandbox. Skipped when no local one runs; failed when
+// VALKEY_URL names one that can't be reached (CI sets it, so a missing service fails).
 func store(t *testing.T) Store {
 	t.Helper()
-	url := os.Getenv("VALKEY_URL")
-	if url == "" {
+	url, named := os.LookupEnv("VALKEY_URL")
+	if !named {
 		url = "redis://localhost:6379"
 	}
 	opts, err := redis.ParseURL(url)
@@ -33,6 +34,9 @@ func store(t *testing.T) Store {
 	}
 	client := redis.NewClient(opts)
 	if err := client.Ping(context.Background()).Err(); err != nil {
+		if named {
+			t.Fatalf("VALKEY_URL %s: %v", url, err)
+		}
 		t.Skipf("no Valkey at %s: %v", url, err)
 	}
 	b := make([]byte, 6)

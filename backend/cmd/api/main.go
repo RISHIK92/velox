@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -114,11 +115,13 @@ func main() {
 	statusMux.HandleFunc("/status", judgeHandler.Status)
 	http.Handle("/status", apiKeyMiddleware.Authenticate(middleware.CheckScope("status", statusMux)))
 
-	// P5-W30-S07 (ADR-0041 in Interval): judge jobs in Interval's JudgeJob/JudgeResult
-	// contract, under the same API-key scopes as /submit and /status.
+	// Judge jobs, in Interval's JudgeJob/JudgeResult contract (README, "Judge jobs"). Only
+	// keys an operator lists may use them: any signed-up user can mint a key and pick its
+	// scopes, and a judge job's priority (ranked first) is the caller's to choose.
 	judgeStore := judgejob.Store{Client: veloxRedis.Client, Prefix: "judge"}
-	http.Handle("POST /judge", apiKeyMiddleware.Authenticate(middleware.CheckScope("submit", judgeStore.SubmitHandler())))
-	http.Handle("GET /judge/{id}", apiKeyMiddleware.Authenticate(middleware.CheckScope("status", judgeStore.ResultHandler())))
+	judgeKeys := judgeKeyGate(os.Getenv("JUDGE_API_KEY_IDS"))
+	http.Handle("POST /judge", apiKeyMiddleware.Authenticate(logged(apiLogSvc, "/judge", judgeKeys(judgeStore.SubmitHandler(apiKeyID)))))
+	http.Handle("GET /judge/{id}", apiKeyMiddleware.Authenticate(logged(apiLogSvc, "/judge/{id}", judgeKeys(judgeStore.ResultHandler(apiKeyID)))))
 
 	// General API
 	http.HandleFunc("/health", healthHandler)
@@ -297,5 +300,64 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"status": "healthy",
+	})
+}
+
+func apiKeyID(r *http.Request) string {
+	id, _ := r.Context().Value(middleware.APIKeyIDKey).(string)
+	return id
+}
+
+// judgeKeyGate admits only the API key IDs in a comma-separated list (JUDGE_API_KEY_IDS);
+// with none listed, /judge is closed.
+func judgeKeyGate(list string) func(http.Handler) http.Handler {
+	allowed := map[string]bool{}
+	for _, id := range strings.Split(list, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			allowed[id] = true
+		}
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !allowed[apiKeyID(r)] {
+				http.Error(w, "this key may not submit judge jobs", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+// logged records each call in the API log, as /submit and /status are, so judge jobs
+// show in a key's stats and audit trail; refused keys (403) included.
+func logged(logs *service.APILogService, endpoint string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		// api_logs.submission_id is a UUID: a malformed id from the path isn't one.
+		var submission string
+		if id, err := uuid.Parse(r.PathValue("id")); err == nil {
+			submission = id.String()
+		}
+		logs.Log(&model.APILog{
+			APIKeyID:     apiKeyID(r),
+			SubmissionID: submission,
+			Endpoint:     endpoint,
+			Method:       r.Method,
+			StatusCode:   rec.status,
+			DurationMs:   int(time.Since(start).Milliseconds()),
+			CreatedAt:    time.Now(),
+		})
 	})
 }

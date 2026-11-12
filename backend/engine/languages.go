@@ -64,14 +64,14 @@ const (
 )
 
 var languages = map[string]Language{
-	// The worker's own base (workers/jobs/Dockerfile), built 2026-10-21. -I and -S: no
+	// Interval's Python worker base, built 2026-10-21. -I and -S: no
 	// user site, no PYTHON* variables, no current directory on the path.
 	"python": {
 		Image: images["python"].Image,
 		Main:  "main.py",
 		Run:   "python3 -I -S /code/main.py",
 	},
-	// The web's own base (apps/web/Dockerfile). TypeScript runs through Node 22's type
+	// Interval's web base. TypeScript runs through Node 22's type
 	// stripping, with no compiler.
 	"javascript": {Image: images["javascript"].Image, Main: "main.js", Run: "node --max-old-space-size=%d /code/main.js",
 		Overhead: Overhead{MemoryMB: 64}, OutOfMemory: "JavaScript heap out of memory"},

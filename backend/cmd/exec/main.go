@@ -21,11 +21,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/rishik92/velox/checker"
 	"github.com/rishik92/velox/engine"
 	"github.com/rishik92/velox/judgejob"
 	"github.com/rishik92/velox/lld"
-	veloxRedis "github.com/rishik92/velox/shared/redis"
 )
 
 // What a run gets unless told otherwise; problems set their own from W30.
@@ -215,11 +216,19 @@ func serve() error {
 			return fmt.Errorf("EXEC_CONCURRENCY %q: 1 to 64", v)
 		}
 	}
-	veloxRedis.Connect()
-	client := veloxRedis.Client
+	addr := os.Getenv("REDIS_ADDR")
+	if addr == "" {
+		return errors.New("REDIS_ADDR is not set")
+	}
+	// Velox's own settings (shared/redis), with a pool sized to the workers: each claims
+	// and finishes on its own connection, with room for lease renewals and the reaper.
+	client := redis.NewClient(&redis.Options{Addr: addr, Password: os.Getenv("REDIS_PASSWORD"), PoolSize: 2*concurrency + 2})
 	defer client.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if err := client.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("redis %s: %w", addr, err)
+	}
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	log.Info("judge: serving", "concurrency", concurrency)
 	w := &judge.Worker{

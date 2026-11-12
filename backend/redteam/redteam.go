@@ -1,7 +1,7 @@
 // Package redteam is EXEC-1's suite: attacks a sandbox must contain, run against any
 // engine through Engine (P5-W28-S02, Q-P5-03). An engine passes only if every attack
 // is contained: none reports an escape, each ends in a verdict it allows, and none
-// errors. It reruns before every release (`pnpm redteam`).
+// errors. It reruns before every release (docs/runbooks/redteam.md).
 package redteam
 
 import (
@@ -20,7 +20,7 @@ type Outcome struct {
 	Stdout  string
 }
 
-// Engine is anything that runs one program in a sandbox: services/exec here, Judge0
+// Engine is anything that runs one program in a sandbox: Velox's engine here, Judge0
 // for the comparison (W28-S04).
 type Engine interface {
 	Run(ctx context.Context, language, source, stdin string) (Outcome, error)
@@ -61,7 +61,7 @@ func Unsafe(a Attack, o Outcome, canary string) string {
 	return ""
 }
 
-// ExecEngine runs attacks on services/exec with one fixed set of limits.
+// ExecEngine runs attacks on Velox's engine with one fixed set of limits.
 type ExecEngine struct{ Runner *engine.Runner }
 
 // The suite's limits; the attacks' thresholds are worked out from them.

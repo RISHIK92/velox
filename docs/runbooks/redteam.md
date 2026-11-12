@@ -60,7 +60,7 @@ Judge0's isolate sandbox needs a privileged container and cgroup v1, which Docke
    - `MAX_MEMORY_LIMIT` at least 131072 (KB);
    - `MAX_MAX_PROCESSES_AND_OR_THREADS` at least 64;
    - `MAX_CPU_TIME_LIMIT` and `MAX_WALL_TIME_LIMIT` at least 5.
-4. Run `docker compose up -d db redis`, then `docker compose up -d`.
+4. In the unpacked Judge0 directory, run `docker compose up -d db redis`, then `docker compose up -d`.
 5. From this repo, on a machine that can reach it:
 
    ```sh

@@ -1,0 +1,7 @@
+frontend
+tests
+diagrams
+docs
+.env
+.git
+**/.DS_Store

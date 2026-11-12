@@ -59,6 +59,7 @@ services:
       - REDIS_PASSWORD=123456
       - EXEC_WORK_DIR=/tmp/velox-exec
       - EXEC_RUNTIME=${EXEC_RUNTIME:-}
+    restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /tmp/velox-exec:/tmp/velox-exec

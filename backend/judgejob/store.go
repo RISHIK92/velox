@@ -8,7 +8,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// P5-W30-S05 (LOAD-3, LOAD-5, ADR-0014): the judge's queue in Valkey. Jobs wait on one
+// The judge's queue in Redis (Interval's LOAD-3 and LOAD-5). Jobs wait on one
 // list per priority. A worker claims the first job of the highest non-empty list and
 // leases it in one atomic step (a Lua script), so a job is never out of the queue
 // without a lease: a worker that dies at any point leaves it for the reaper. A lease
@@ -33,6 +33,9 @@ func (s Store) queue(priority string) string { return s.Prefix + ":queue:" + pri
 func (s Store) running() string              { return s.Prefix + ":running" }
 func (s Store) result(id string) string      { return s.Prefix + ":result:" + id }
 func (s Store) reply(id string) string       { return s.Prefix + ":reply:" + id }
+
+// Which API key submitted a job, kept as long as its result (http.go).
+func (s Store) owner(id string) string { return s.Prefix + ":owner:" + id }
 
 // Submit queues a job (for Go callers and tests; TS has its own client).
 func (s Store) Submit(ctx context.Context, priority string, job []byte) error {
@@ -126,6 +129,8 @@ func (s Store) Finish(ctx context.Context, id string, result []byte) (bool, erro
 	pipe := s.Client.TxPipeline()
 	pipe.RPush(ctx, s.reply(id), result)
 	pipe.Expire(ctx, s.reply(id), resultTTL)
+	// The job's owner (http.go) now lives exactly as long as its result.
+	pipe.Expire(ctx, s.owner(id), resultTTL)
 	_, err = pipe.Exec(ctx)
 	return true, err
 }
