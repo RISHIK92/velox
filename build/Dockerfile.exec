@@ -1,0 +1,21 @@
+# Velox's execution engine (`exec serve`: the judge's workers; Interval's ADR-0041,
+# EXEC-5): the Go binary and a static docker CLI, which it drives on its own host. Built
+# natively and cross-compiled for the target. Context: the repository root.
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS build
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /src
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/ ./
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags="-s -w" -o /exec ./cmd/exec
+
+# The docker CLI's own image (Alpine, static CLI), built 2026-10-21. The service runs as
+# root with the host's Docker socket, which is the host's root: a flaw in how it handles
+# a job is a host compromise, so its own input handling is inside the red-team's scope.
+# Runs can't reach the host or its role (--network none; IMDSv2, hop limit 1).
+FROM docker:29.9.2-cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14809346814bbfdb
+COPY --from=build /exec /usr/local/bin/exec
+ENTRYPOINT ["/usr/local/bin/exec"]
+CMD ["serve"]

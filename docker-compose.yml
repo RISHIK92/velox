@@ -43,6 +43,26 @@ services:
       - DB_NAME=${POSTGRES_DB}
     env_file: .env
 
+  # The judge's workers (`exec serve`; Interval's ADR-0041): every run in a fresh sandbox
+  # container on this host's Docker. Run directories are bind-mounted into those
+  # containers by path, so EXEC_WORK_DIR is the same path on the host and in here.
+  # EXEC_RUNTIME=runsc (gVisor) wherever player code runs.
+  judge-worker:
+    build:
+      context: .
+      dockerfile: build/Dockerfile.exec
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=123456
+      - EXEC_WORK_DIR=/tmp/velox-exec
+      - EXEC_RUNTIME=${EXEC_RUNTIME:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/velox-exec:/tmp/velox-exec
+
   api:
     build:
       context: .

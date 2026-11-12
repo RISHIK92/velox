@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "class": {
+      "type": "string",
+      "pattern": "^[A-Z][a-zA-Z0-9]{0,30}$"
+    },
+    "constructor": {
+      "type": "object",
+      "properties": {
+        "params": {
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-zA-Z0-9]{0,30}$"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "type"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "methods": {
+      "minItems": 1,
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-zA-Z0-9]{0,30}$"
+          },
+          "params": {
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-zA-Z0-9]{0,30}$"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "type"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "returns": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "void"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "params",
+          "returns"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "class",
+    "constructor",
+    "methods"
+  ],
+  "additionalProperties": false,
+  "description": "A problem's interface (LLDQ-1). Structure only: the naming, uniqueness and type-grammar rules are zod refinements in packages/lld/src/interface.ts (ADR-0040)."
+}

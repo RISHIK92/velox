@@ -16,6 +16,7 @@ import (
 	"github.com/rishik92/velox/auth/repository"
 	"github.com/rishik92/velox/auth/service"
 	"github.com/rishik92/velox/judge"
+	judgejob "github.com/rishik92/velox/judgejob"
 	veloxRedis "github.com/rishik92/velox/shared/redis"
 
 	_ "github.com/rishik92/velox/docs"
@@ -112,6 +113,12 @@ func main() {
 	statusMux := http.NewServeMux()
 	statusMux.HandleFunc("/status", judgeHandler.Status)
 	http.Handle("/status", apiKeyMiddleware.Authenticate(middleware.CheckScope("status", statusMux)))
+
+	// P5-W30-S07 (ADR-0041 in Interval): judge jobs in Interval's JudgeJob/JudgeResult
+	// contract, under the same API-key scopes as /submit and /status.
+	judgeStore := judgejob.Store{Client: veloxRedis.Client, Prefix: "judge"}
+	http.Handle("POST /judge", apiKeyMiddleware.Authenticate(middleware.CheckScope("submit", judgeStore.SubmitHandler())))
+	http.Handle("GET /judge/{id}", apiKeyMiddleware.Authenticate(middleware.CheckScope("status", judgeStore.ResultHandler())))
 
 	// General API
 	http.HandleFunc("/health", healthHandler)

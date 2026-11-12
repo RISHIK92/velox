@@ -1,0 +1,21 @@
+{
+  "python": {
+    "image": "python:3.13.17-slim-bookworm@sha256:e32be0e55814a08977501ca863271d9bd02443710db8f2afaf8372e2c4508530"
+  },
+  "javascript": {
+    "image": "node:22.22.3-bookworm-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752"
+  },
+  "typescript": {
+    "image": "node:22.22.3-bookworm-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752"
+  },
+  "java": {
+    "image": "eclipse-temurin:21.0.12.1_1-jdk@sha256:5d90b26c0784ccf55af55f97cbcf7f3969c66a06299c93bdc72649219942a48f"
+  },
+  "cpp": {
+    "image": "gcc:14.3.0@sha256:4e2d22617a3b4af1ad0150ba6ca3cb8a975c44c1abac6f9a09870b93cb5c363b"
+  },
+  "go": {
+    "image": "velox-exec-go:1",
+    "build": "build/images/go"
+  }
+}

@@ -91,3 +91,48 @@ jobs:
           name: performance-test-binary
           path: tests/performance/performance_test_binary
           retention-days: 7
+
+  # The judge engine (ported from Interval's services/exec, its ADR-0041): the contract
+  # copy, the checker, the judge's queue and HTTP API, then every language in the real
+  # sandbox and the red-team suite against it (EXEC-1).
+  judge-engine:
+    name: Judge engine — contract, sandbox, red-team
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    env:
+      VALKEY_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+
+      - name: Vet and unit tests
+        working-directory: backend
+        run: |
+          go vet ./engine/ ./checker/ ./lld/ ./judgejob/ ./redteam/ ./cmd/exec/ ./contract/
+          go test -count=1 ./contract/ ./checker/ ./lld/ ./judgejob/ ./cmd/exec/
+
+      - name: Go's runner image
+        run: docker build -q -t velox-exec-go:1 build/images/go
+
+      # The engine bounds each docker call at 30 s: a cold pull of the compilers' images
+      # (gcc is over 1 GB) must not happen inside a run.
+      - name: Pull the language images
+        run: |
+          jq -r '.[] | select(.build == null) | .image' backend/engine/images.json \
+            | sort -u | xargs -r -n1 docker pull -q
+
+      - name: Sandbox, judge workers and the red-team suite
+        working-directory: backend
+        env:
+          EXEC_INTEGRATION: "1"
+        # One package at a time: the timing attacks mustn't share the runner's CPUs.
+        run: go test -p 1 -count=1 -v ./engine/ ./redteam/ ./judgejob/

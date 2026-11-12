@@ -25,6 +25,30 @@ Core Go application logic.
 
 ---
 
+## Judge jobs and the sandboxed engine
+
+Velox also judges Interval's jobs, in Interval's `JudgeJob`/`JudgeResult` contract:
+
+- `POST /judge` (API-key scope `submit`) queues a job at its priority (ranked, rooms, casual, run) and returns `202 {"id": …}`. A job outside the contract gets 400.
+- `GET /judge/{id}` (scope `status`) returns the `JudgeResult`, or 404 while the job is pending.
+
+The `judge-worker` service (`backend/cmd/exec serve`) takes those jobs. Each run gets a fresh, locked-down container on the host's Docker:
+
+- no network, a read-only root, a non-root user and no capabilities;
+- pids, memory and CPU limits;
+- gVisor with `EXEC_RUNTIME=runsc`.
+
+The checker judges a run's output outside the sandbox.
+
+- **Packages:**
+  - `backend/engine`: the sandbox and the language strategies (Python, JavaScript, TypeScript, Java, C++, Go).
+  - `backend/checker`: the checker.
+  - `backend/judgejob`: the queue, the workers and the HTTP handlers.
+  - `backend/lld`: the LLD scenario types.
+  - `backend/redteam`: the red-team suite ([docs/runbooks/redteam.md](docs/runbooks/redteam.md)).
+- **Generated:** `backend/lld/types.go`, `backend/judgejob/types.go` and `backend/contract/schema/` are generated in Interval (`pnpm contracts:velox`). `backend/contract` tests that they agree.
+- **The `exec` binary** (`go build ./cmd/exec`) also has `run` and `check` for local tooling.
+
 ## API Documentation
 
 The project uses Swagger (OpenAPI 3.0) for API documentation.
