@@ -37,7 +37,7 @@ A negative control runs the probes in a deliberately weak container and requires
 
 | Where                                           | Command                                       | Result                                                            |
 | ----------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------- |
-| This repo, locally (Docker Desktop, runc)       | see below                                     | 2026-11-12: all 22 contained (OrbStack, after the port)           |
+| This repo, locally (Docker Desktop, runc)       | see below                                     | 2026-11-14: all 22 contained (see below); 2026-11-12: all 22 (OrbStack, after the port)           |
 | CI (GitHub's runner Docker, runc)               | the `judge-engine` job                        | on every push to `main` and every pull request                    |
 | An execution host with gVisor (EXEC-5)          | the same, with `EXEC_RUNTIME=runsc`           | **owner to run**                                                  |
 | Judge0 CE                                       | below                                         | **owner to run**                                                  |
@@ -78,3 +78,13 @@ Judge0's isolate sandbox needs a privileged container and cgroup v1, which Docke
 - Any unsafe result loses.
 - If both engines pass, Velox stays the engine (the owner's decision, Interval's ADR-0041), with EXEC-3 built in.
 - No player code runs on Velox before the gVisor row is in.
+
+## 2026-11-14 rerun (Interval's P5-W34-S03)
+
+All 22 attacks were contained, with nothing escaped. One verdict wasn't the expected one in the full run: Go's memory hog ended on `time_limit` after 17.8 s, where the suite allows only `memory_limit`.
+
+- **The cause:** the machine was under load (average about 5, from other work). The limit is wall-clock time (Interval's owner chose wall clock now, cgroup CPU later), and Go's compile and allocation ran past it before reaching the memory cap.
+- **The rerun:** run alone, the same attack reached `memory_limit` twice (3.7 s and 5.6 s).
+
+On a loaded host, run the suite with nothing else using Docker. The wall-clock limit, Docker start-up included, is also why time-sensitive rows can flake.
+
