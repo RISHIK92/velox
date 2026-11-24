@@ -129,12 +129,13 @@ type ResultLine struct {
 	Call  *int64          `json:"call"`
 	Value json.RawMessage `json:"value,omitempty"`
 	Error *string         `json:"error,omitempty"`
+	Line  *int64          `json:"line,omitempty"`
 }
 
 // Validate checks ResultLine against its contract.
 func (v ResultLine) Validate() error {
 	matched := 0
-	if v.Call != nil && len(v.Value) > 0 && !(v.Error != nil) {
+	if v.Call != nil && len(v.Value) > 0 && !(v.Error != nil) && !(v.Line != nil) {
 		matched++
 	}
 	if v.Call != nil && v.Error != nil && !(len(v.Value) > 0) {
@@ -154,6 +155,14 @@ func (v ResultLine) Validate() error {
 	if v.Error != nil {
 		if !pattern0.MatchString(*v.Error) {
 			return fmt.Errorf("ResultLine.error: doesn't match its pattern")
+		}
+	}
+	if v.Line != nil {
+		if *v.Line < 1 {
+			return fmt.Errorf("ResultLine.line: below 1")
+		}
+		if *v.Line > 1000000 {
+			return fmt.Errorf("ResultLine.line: above 1000000")
 		}
 	}
 	return nil

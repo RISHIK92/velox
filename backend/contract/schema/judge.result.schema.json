@@ -76,6 +76,29 @@
           },
           "stderr": {
             "type": "string"
+          },
+          "failure": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[\\x20-\\x7e]{1,64}$"
+              },
+              "message": {
+                "type": "string",
+                "pattern": "^[\\x20-\\x7e]{1,200}$"
+              },
+              "line": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000000
+              }
+            },
+            "required": [
+              "name",
+              "message"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [

@@ -42,6 +42,8 @@ The `judge-worker` service (`backend/cmd/exec serve`) takes those jobs. Each run
 
 The checker judges a run's output outside the sandbox.
 
+A run the job names is a test its player may see (Interval's visible tests). When it fails, its result's `failure` gives the name, a short message (what the call expected and got, the error, or the compile error or crash) and, when the toolchain says so, the line of the player's file. That file is the job's one file beside the language's harness. An unnamed run, a hidden test, never gets one.
+
 - **Packages:**
   - `backend/engine`: the sandbox and the language strategies (Python, JavaScript, TypeScript, Java, C++, Go).
   - `backend/checker`: the checker.

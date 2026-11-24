@@ -9,6 +9,7 @@ func TestDecodeResultLineHoldsTheContract(t *testing.T) {
 		`{"call":0,"value":null}`,
 		`{"call":2,"value":{"ana":1}}`,
 		`{"call":1,"error":"IndexError: out of range"}`,
+		`{"call":1,"error":"KeyError: 'x'","line":14}`, // Interval's Q-WD-17
 	}
 	for _, s := range good {
 		if _, err := DecodeResultLine([]byte(s)); err != nil {
@@ -23,6 +24,8 @@ func TestDecodeResultLineHoldsTheContract(t *testing.T) {
 		`{"call":-1,"value":1}`,                    // negative
 		`{"call":1,"error":"é"}`,                   // not printable ASCII
 		`{"call":1,"value":1}{"call":2,"value":1}`, // two values
+		`{"call":1,"value":1,"line":3}`,            // a line on a value
+		`{"call":1,"error":"x","line":0}`,          // lines count from 1
 	}
 	long := `{"call":1,"error":"`
 	for range 201 {

@@ -199,6 +199,7 @@ func (w *Worker) process(ctx context.Context, job JudgeJob) JudgeResult {
 	}
 	out := []RunResult{}
 	returned := 0
+	player := playersFile(*job.Language, files)
 	for i, run := range job.Runs {
 		res, err := w.Runner.Run(ctx, engine.Job{Language: *job.Language, Files: files, Stdin: *run.Stdin, Limits: limits})
 		if err != nil {
@@ -206,12 +207,17 @@ func (w *Worker) process(ctx context.Context, job JudgeJob) JudgeResult {
 		}
 		verdict := string(res.Verdict)
 		r := RunResult{Verdict: &verdict, TimeMs: &res.TimeMs}
+		var mismatch *checker.Mismatch
 		if run.Expected != nil {
-			report, err := judged(run, res)
+			report, m, err := judged(run, res)
 			if err != nil {
 				return failed(id, fmt.Sprintf("run %d: %v", i, err))
 			}
-			r.Report = report
+			r.Report, mismatch = report, m
+		}
+		// Q-WD-17: why, only for a named run (a visible test), never a hidden one (LLDQ-4).
+		if run.Name != nil {
+			r.Failure = explain(*run.Name, *job.Language, player, run, res, mismatch)
 		}
 		// Output only when asked (LLDQ-4), and only within the job's budget.
 		if run.ReturnOutput != nil && *run.ReturnOutput && returned+len(res.Stdout)+len(res.Stderr) <= maxReturnedOutput {
@@ -225,35 +231,89 @@ func (w *Worker) process(ctx context.Context, job JudgeJob) JudgeResult {
 }
 
 // judged holds a run's output to its expected results: the run's stdin is the scenario
-// the expected lines answer. A fault in that data is the job's, never the code's.
-func judged(run Run, res engine.Result) (*Report, error) {
-	scenario, err := lld.DecodeScenario([]byte(*run.Stdin))
+// the expected lines answer. A fault in that data is the job's, never the code's. The
+// checker's mismatch comes back too, for explain.
+func judged(run Run, res engine.Result) (*Report, *checker.Mismatch, error) {
+	scenario, expected, err := problemOf(run)
 	if err != nil {
-		return nil, fmt.Errorf("%w: its stdin isn't a scenario: %w", checker.ErrProblem, err)
-	}
-	expected, err := convert(run.Expected, lld.DecodeResultLine)
-	if err != nil {
-		return nil, fmt.Errorf("%w: expected: %w", checker.ErrProblem, err)
+		return nil, nil, err
 	}
 	checks, err := convert(run.Checks, lld.DecodeCheck)
 	if err != nil {
-		return nil, fmt.Errorf("%w: checks: %w", checker.ErrProblem, err)
+		return nil, nil, fmt.Errorf("%w: checks: %w", checker.ErrProblem, err)
 	}
 	if res.Verdict != engine.OK {
 		// A run that didn't finish has no results to compare.
 		passed := false
-		return &Report{Passed: &passed}, nil
+		return &Report{Passed: &passed}, nil, nil
 	}
 	report, err := checker.Check(scenario, expected, []byte(res.Stdout), checks)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	r := &Report{Passed: &report.Passed}
 	if m := report.FirstMismatch; m != nil {
 		call, reason := int64(m.Call), string(m.Reason)
 		r.FirstMismatch = &Mismatch{Call: &call, Reason: &reason}
 	}
-	return r, nil
+	return r, report.FirstMismatch, nil
+}
+
+// A run's scenario (its stdin) and expected results, as the checker's types.
+func problemOf(run Run) (lld.Scenario, []lld.ResultLine, error) {
+	scenario, err := lld.DecodeScenario([]byte(*run.Stdin))
+	if err != nil {
+		return scenario, nil, fmt.Errorf("%w: its stdin isn't a scenario: %w", checker.ErrProblem, err)
+	}
+	expected, err := convert(run.Expected, lld.DecodeResultLine)
+	if err != nil {
+		return scenario, nil, fmt.Errorf("%w: expected: %w", checker.ErrProblem, err)
+	}
+	return scenario, expected, nil
+}
+
+// The player's file, whose lines a failure names: the one file beside the language's
+// harness (its main file); "" when there isn't exactly one.
+func playersFile(language string, files map[string]string) string {
+	lang, ok := engine.Lookup(language)
+	if !ok {
+		return ""
+	}
+	player := ""
+	for name := range files {
+		if name == lang.Main {
+			continue
+		}
+		if player != "" {
+			return ""
+		}
+		player = name
+	}
+	return player
+}
+
+// explain says why a named run failed, nil when it passed: the run's own output is
+// described, so this is for a test its player may see (Q-WD-17), never a hidden one.
+func explain(name, language, player string, run Run, res engine.Result, m *checker.Mismatch) *Failure {
+	var message string
+	var line int
+	switch {
+	case res.Verdict != engine.OK:
+		message, line = engine.Diagnose(language, res.Verdict, res.Stderr, player)
+	case m != nil:
+		// Already decoded once by judged, so without fault here.
+		scenario, expected, _ := problemOf(run)
+		message, line = checker.Describe(scenario, expected, []byte(res.Stdout), *m)
+	default:
+		return nil
+	}
+	message = checker.Clean(message)
+	f := &Failure{Name: &name, Message: &message}
+	if line > 0 {
+		l := int64(line)
+		f.Line = &l
+	}
+	return f
 }
 
 // convert re-reads the job's values as the checker's own types, through JSON: the two

@@ -115,6 +115,11 @@
                     "error": {
                       "type": "string",
                       "pattern": "^[\\x20-\\x7e]{0,200}$"
+                    },
+                    "line": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1000000
                     }
                   },
                   "required": [
@@ -160,6 +165,10 @@
           },
           "returnOutput": {
             "type": "boolean"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[\\x20-\\x7e]{1,64}$"
           }
         },
         "required": [

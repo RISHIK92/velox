@@ -14,9 +14,13 @@ var pattern0 = regexp.MustCompile("^[A-Za-z0-9_.-]{1,64}$")
 
 var pattern1 = regexp.MustCompile("^[\\x20-\\x7e]{0,200}$")
 
-var pattern2 = regexp.MustCompile("^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$")
+var pattern2 = regexp.MustCompile("^[\\x20-\\x7e]{1,64}$")
 
-var pattern3 = regexp.MustCompile("^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$")
+var pattern3 = regexp.MustCompile("^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$")
+
+var pattern4 = regexp.MustCompile("^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$")
+
+var pattern5 = regexp.MustCompile("^[\\x20-\\x7e]{1,200}$")
 
 type File struct {
 	Name    *string `json:"name"`
@@ -72,12 +76,13 @@ type ResultLine struct {
 	Call  *int64          `json:"call"`
 	Value json.RawMessage `json:"value,omitempty"`
 	Error *string         `json:"error,omitempty"`
+	Line  *int64          `json:"line,omitempty"`
 }
 
 // Validate checks ResultLine against its contract.
 func (v ResultLine) Validate() error {
 	matched := 0
-	if v.Call != nil && len(v.Value) > 0 && !(v.Error != nil) {
+	if v.Call != nil && len(v.Value) > 0 && !(v.Error != nil) && !(v.Line != nil) {
 		matched++
 	}
 	if v.Call != nil && v.Error != nil && !(len(v.Value) > 0) {
@@ -97,6 +102,14 @@ func (v ResultLine) Validate() error {
 	if v.Error != nil {
 		if !pattern1.MatchString(*v.Error) {
 			return fmt.Errorf("ResultLine.error: doesn't match its pattern")
+		}
+	}
+	if v.Line != nil {
+		if *v.Line < 1 {
+			return fmt.Errorf("ResultLine.line: below 1")
+		}
+		if *v.Line > 1000000 {
+			return fmt.Errorf("ResultLine.line: above 1000000")
 		}
 	}
 	return nil
@@ -143,6 +156,7 @@ type Run struct {
 	Expected     []ResultLine `json:"expected,omitempty"`
 	Checks       []Check      `json:"checks,omitempty"`
 	ReturnOutput *bool        `json:"returnOutput,omitempty"`
+	Name         *string      `json:"name,omitempty"`
 }
 
 // Validate checks Run against its contract.
@@ -173,6 +187,11 @@ func (v Run) Validate() error {
 			}
 		}
 	}
+	if v.Name != nil {
+		if !pattern2.MatchString(*v.Name) {
+			return fmt.Errorf("Run.name: doesn't match its pattern")
+		}
+	}
 	return nil
 }
 
@@ -191,7 +210,7 @@ func (v JudgeJob) Validate() error {
 	if !(v.Id != nil) {
 		return fmt.Errorf("JudgeJob.id: missing")
 	}
-	if !pattern2.MatchString(*v.Id) {
+	if !pattern3.MatchString(*v.Id) {
 		return fmt.Errorf("JudgeJob.id: doesn't match its pattern")
 	}
 	if !(v.Priority != nil) {
@@ -247,7 +266,7 @@ func (v JudgeJob) Validate() error {
 	if !(v.SubmittedAt != nil) {
 		return fmt.Errorf("JudgeJob.submittedAt: missing")
 	}
-	if !pattern3.MatchString(*v.SubmittedAt) {
+	if !pattern4.MatchString(*v.SubmittedAt) {
 		return fmt.Errorf("JudgeJob.submittedAt: doesn't match its pattern")
 	}
 	return nil
@@ -310,12 +329,44 @@ func (v Report) Validate() error {
 	return nil
 }
 
+type Failure struct {
+	Name    *string `json:"name"`
+	Message *string `json:"message"`
+	Line    *int64  `json:"line,omitempty"`
+}
+
+// Validate checks Failure against its contract.
+func (v Failure) Validate() error {
+	if !(v.Name != nil) {
+		return fmt.Errorf("Failure.name: missing")
+	}
+	if !pattern2.MatchString(*v.Name) {
+		return fmt.Errorf("Failure.name: doesn't match its pattern")
+	}
+	if !(v.Message != nil) {
+		return fmt.Errorf("Failure.message: missing")
+	}
+	if !pattern5.MatchString(*v.Message) {
+		return fmt.Errorf("Failure.message: doesn't match its pattern")
+	}
+	if v.Line != nil {
+		if *v.Line < 1 {
+			return fmt.Errorf("Failure.line: below 1")
+		}
+		if *v.Line > 1000000 {
+			return fmt.Errorf("Failure.line: above 1000000")
+		}
+	}
+	return nil
+}
+
 type RunResult struct {
-	Verdict *string `json:"verdict"`
-	TimeMs  *int64  `json:"timeMs"`
-	Report  *Report `json:"report,omitempty"`
-	Stdout  *string `json:"stdout,omitempty"`
-	Stderr  *string `json:"stderr,omitempty"`
+	Verdict *string  `json:"verdict"`
+	TimeMs  *int64   `json:"timeMs"`
+	Report  *Report  `json:"report,omitempty"`
+	Stdout  *string  `json:"stdout,omitempty"`
+	Stderr  *string  `json:"stderr,omitempty"`
+	Failure *Failure `json:"failure,omitempty"`
 }
 
 // Validate checks RunResult against its contract.
@@ -342,6 +393,11 @@ func (v RunResult) Validate() error {
 			return fmt.Errorf("RunResult.report: %w", err)
 		}
 	}
+	if v.Failure != nil {
+		if err := v.Failure.Validate(); err != nil {
+			return fmt.Errorf("RunResult.failure: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -357,7 +413,7 @@ func (v JudgeResult) Validate() error {
 	if !(v.Id != nil) {
 		return fmt.Errorf("JudgeResult.id: missing")
 	}
-	if !pattern2.MatchString(*v.Id) {
+	if !pattern3.MatchString(*v.Id) {
 		return fmt.Errorf("JudgeResult.id: doesn't match its pattern")
 	}
 	if !(v.Status != nil) {
