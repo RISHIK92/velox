@@ -24,6 +24,10 @@ var imageEnv = map[string][]string{
 
 var writePaths = []string{"/code/x", "/x", "/etc/x", "/usr/x", "/var/tmp/x"}
 
+// A compiled language's runs also mount the job's program, read-only, at /build (an
+// interpreted one has no /build: ENOENT there would read as an escape).
+var compiledWritePaths = append(append([]string(nil), writePaths...), "/build/x")
+
 func quoted(names []string) string {
 	s := ""
 	for i, n := range names {
@@ -256,13 +260,13 @@ func Native(memoryMB int) []Attack {
 	}
 	return append(out,
 		Attack{Name: "java: probe", Language: "java", Allowed: []string{ok}, CatchesWeak: true,
-			Source: fmt.Sprintf(javaProbe, quoted(imageEnv["java"]), quoted(writePaths))},
+			Source: fmt.Sprintf(javaProbe, quoted(imageEnv["java"]), quoted(compiledWritePaths))},
 		Attack{Name: "cpp: probe", Language: "cpp", Allowed: []string{ok}, CatchesWeak: true,
-			Source: fmt.Sprintf(cppProbe, quoted(imageEnv["cpp"]), quoted(writePaths))},
+			Source: fmt.Sprintf(cppProbe, quoted(imageEnv["cpp"]), quoted(compiledWritePaths))},
 		Attack{Name: "cpp: memory", Language: "cpp", Resource: true, Allowed: []string{memory},
 			Source: fmt.Sprintf(cppHog, chunks("cpp"))},
 		Attack{Name: "go: probe", Language: "go", Allowed: []string{ok}, CatchesWeak: true,
-			Source: fmt.Sprintf(goProbe, quoted(imageEnv["go"]), quoted(writePaths))},
+			Source: fmt.Sprintf(goProbe, quoted(imageEnv["go"]), quoted(compiledWritePaths))},
 		Attack{Name: "go: memory", Language: "go", Resource: true, Allowed: []string{memory},
 			Source: fmt.Sprintf(goHog, chunks("go"))},
 	)

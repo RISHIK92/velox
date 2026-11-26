@@ -9,32 +9,35 @@ import (
 )
 
 // P5-W28-S03 (EXEC-2, C-04, Q-P5-04): the five launch languages. Each has its image,
-// pinned by digest and at least two weeks old, its source file, how it compiles (once
-// per submission, into /tmp) and how it runs. A toolchain's own needs (a JVM, a
-// compiler) are added to the job's limits as its overhead, so a problem's limits stay
-// about the program.
+// pinned by digest and at least two weeks old, its source file, how it compiles and how
+// it runs. A compiled language compiles once per job, in a container of its own, into
+// compileOut; every run of the job then finds that program read-only at buildDir. A
+// toolchain's own needs (a JVM, a compiler) are added to the job's limits as its
+// overhead, so a problem's limits stay about the program.
 type Language struct {
 	Image string
 	// The file the submission is written to.
 	Main string
-	// Shell commands; Compile is empty for interpreted languages. %d in Run is the job's
-	// memory in MB, so a runtime with its own heap sizes it to the job, not the
-	// container.
+	// Shell commands; Compile is empty for interpreted languages. Compile writes into
+	// compileOut; Run reads the program from buildDir. %d in Run is the job's memory in
+	// MB, so a runtime with its own heap sizes it to the job, not the container.
 	Compile, Run string
-	Overhead     Overhead
+	// The compile's own wall-clock budget (owner, 2026-11-26): it has a container of its
+	// own, so the program's time limit starts only when the program does, and a compile
+	// that overruns it is CompileTimeLimit, never the program's TimeLimit.
+	CompileSeconds int
+	Overhead       Overhead
 	// What the runtime prints when its own heap is full: scored as a memory limit,
 	// since the container's limit is never reached.
 	OutOfMemory string
 }
 
-// A toolchain's own needs, added to the job's limits. Seconds is the compile's own
-// budget: the program's clock starts when it has compiled. shortcut: the memory overhead
-// stays available to the program after compiling (a cgroup's limit can't shrink inside
-// the container); per-problem limits come from reference solutions run the same way
-// (EXEC-2), so it is the same for everyone. Cap the run phase separately if references
-// show it matters.
+// A toolchain's own needs, added to the job's limits, the compile's and every run's
+// alike: the program keeps the memory a compiled language's toolchain had when both ran
+// in one container, so per-problem limits, which come from reference solutions run the
+// same way (EXEC-2), mean what they meant.
 type Overhead struct {
-	MemoryMB, Seconds, TmpMB int
+	MemoryMB, TmpMB int
 }
 
 // P5-W28-S05: the images, in one file the infra reads too (it mirrors them into ECR
@@ -59,8 +62,12 @@ var images = func() map[string]imageEntry {
 }()
 
 const (
+	// Where a compile leaves the program, in its own container's /tmp.
+	compileOut = "/tmp/out"
+	// Where each run of the job finds it, mounted read-only.
+	buildDir = "/build"
 	// The go build environment, set for the build only: the program gets none of it.
-	goBuild = "cp -r /opt/gocache /tmp/gocache && GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOTOOLCHAIN=local CGO_ENABLED=0 go build -o /tmp/main /code/*.go"
+	goBuild = "cp -r /opt/gocache /tmp/gocache && GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOTOOLCHAIN=local CGO_ENABLED=0 go build -o /tmp/out/main /code/*.go"
 )
 
 var languages = map[string]Language{
@@ -80,29 +87,34 @@ var languages = map[string]Language{
 		Overhead: Overhead{MemoryMB: 64}, OutOfMemory: "JavaScript heap out of memory"},
 	"typescript": {Image: images["typescript"].Image, Main: "main.ts", Run: "node --max-old-space-size=%d /code/main.ts",
 		Overhead: Overhead{MemoryMB: 64}, OutOfMemory: "JavaScript heap out of memory"},
-	// Built 2026-10-26; the 21-jdk tag's current build was a day old.
+	// Built 2026-10-26; the 21-jdk tag's current build was a day old. Compile budgets
+	// (owner, 2026-11-26): three times what an LLD harness alone takes on one CPU, so a
+	// heavy but fair submission (a C++ <regex>, many Java classes) still compiles.
 	"java": {
-		Image:       images["java"].Image,
-		Main:        "Main.java",
-		Compile:     "javac -d /tmp/out /code/Main.java",
-		Run:         "java -Xmx%dm -XX:+UseSerialGC -cp /tmp/out Main",
-		Overhead:    Overhead{MemoryMB: 256, Seconds: 6},
-		OutOfMemory: "java.lang.OutOfMemoryError",
+		Image:          images["java"].Image,
+		Main:           "Main.java",
+		Compile:        "javac -d /tmp/out /code/Main.java",
+		Run:            "java -Xmx%dm -XX:+UseSerialGC -cp /build Main",
+		CompileSeconds: 15,
+		Overhead:       Overhead{MemoryMB: 256},
+		OutOfMemory:    "java.lang.OutOfMemoryError",
 	},
 	// Built 2026-06-24; the 14 tag's current build was a week old.
 	"cpp": {
-		Image:    images["cpp"].Image,
-		Main:     "main.cpp",
-		Compile:  "g++ -O2 -std=c++20 -o /tmp/main /code/main.cpp",
-		Run:      "/tmp/main",
-		Overhead: Overhead{MemoryMB: 256, Seconds: 5},
+		Image:          images["cpp"].Image,
+		Main:           "main.cpp",
+		Compile:        "g++ -O2 -std=c++20 -o /tmp/out/main /code/main.cpp",
+		Run:            "/build/main",
+		CompileSeconds: 15,
+		Overhead:       Overhead{MemoryMB: 256},
 	},
 	"go": {
-		Image:    images["go"].Image,
-		Main:     "main.go",
-		Compile:  goBuild,
-		Run:      "/tmp/main",
-		Overhead: Overhead{MemoryMB: 384, Seconds: 8, TmpMB: 128},
+		Image:          images["go"].Image,
+		Main:           "main.go",
+		Compile:        goBuild,
+		Run:            "/build/main",
+		CompileSeconds: 20,
+		Overhead:       Overhead{MemoryMB: 384, TmpMB: 128},
 	},
 }
 
@@ -121,30 +133,34 @@ func Names() []string {
 	return []string{"python", "javascript", "typescript", "java", "cpp", "go"}
 }
 
-// ready is printed once the code has compiled, before the program starts: a submission
-// without it never compiled. readyShell is the same bytes for printf.
-const (
-	ready      = "\x1eREADY\n"
-	readyShell = `\036READY\n`
-)
+// compileCmd is the compile container's one command: compile (with no stdin, its output
+// on stderr), then send what it made as a tar on stdout, the only way out of the
+// container. Exit 1 is the code's own failure to compile.
+func (l Language) compileCmd() []string {
+	return []string{"sh", "-c", "{ mkdir -p " + compileOut + " && " + l.Compile + "; } </dev/null >&2 || exit 1; cd " + compileOut + " && exec tar -cf - ."}
+}
 
-// Cmd is the container's one command: compile (with no stdin, its output on stderr),
-// say so, then become the program. memoryMB is the job's own memory, for the heap.
-func (l Language) Cmd(memoryMB int) []string {
+// RunCmd is a run's one command: the program. memoryMB is the job's own memory, for the
+// heap.
+func (l Language) RunCmd(memoryMB int) []string {
 	run := l.Run
 	if strings.Contains(run, "%d") {
 		run = fmt.Sprintf(run, memoryMB)
 	}
-	if l.Compile == "" {
-		return []string{"sh", "-c", "exec " + run}
-	}
-	return []string{"sh", "-c", l.Compile + " </dev/null >&2 || exit 1; printf '" + readyShell + "'; exec " + run}
+	return []string{"sh", "-c", "exec " + run}
 }
 
 // with adds the language's overhead to a job's limits.
 func (l Language) with(j Limits) Limits {
 	j.MemoryMB += l.Overhead.MemoryMB
-	j.Seconds += l.Overhead.Seconds
 	j.TmpMB += l.Overhead.TmpMB
+	return j
+}
+
+// compiling is the compile container's limits: the job's, with the toolchain's overhead,
+// and the compile's own budget for its time.
+func (l Language) compiling(j Limits) Limits {
+	j = l.with(j)
+	j.Seconds = l.CompileSeconds
 	return j
 }

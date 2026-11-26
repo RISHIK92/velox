@@ -79,15 +79,24 @@ type fake struct {
 	hold  chan struct{}
 }
 
-func (f *fake) Run(ctx context.Context, j engine.Job) (engine.Result, error) {
+func (f *fake) Prepare(context.Context, engine.Job) (engine.Program, error) {
+	return fakeProgram{f}, nil
+}
+
+type fakeProgram struct{ f *fake }
+
+func (p fakeProgram) Run(_ context.Context, stdin string) (engine.Result, error) {
+	f := p.f
 	f.mu.Lock()
-	f.order = append(f.order, j.Stdin)
+	f.order = append(f.order, stdin)
 	f.mu.Unlock()
 	if f.hold != nil {
 		<-f.hold
 	}
-	return engine.Result{Verdict: engine.OK, Stdout: "out:" + j.Stdin}, nil
+	return engine.Result{Verdict: engine.OK, Stdout: "out:" + stdin}, nil
 }
+
+func (fakeProgram) Close() {}
 
 func (f *fake) ran() []string {
 	f.mu.Lock()

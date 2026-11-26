@@ -375,7 +375,7 @@ func (v RunResult) Validate() error {
 		return fmt.Errorf("RunResult.verdict: missing")
 	}
 	switch *v.Verdict {
-	case "ok", "runtime_error", "time_limit", "memory_limit", "output_limit", "compile_error":
+	case "ok", "runtime_error", "time_limit", "memory_limit", "output_limit", "compile_error", "compile_time_limit":
 	default:
 		return fmt.Errorf("RunResult.verdict: not one of its values")
 	}

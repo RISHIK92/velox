@@ -3,28 +3,34 @@ package judge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rishik92/velox/engine"
 )
 
-// sequence answers each run in turn with its own result.
+// sequence is a job's program that answers each run in turn with its own result.
 type sequence struct {
 	mu      sync.Mutex
 	results []engine.Result
 }
 
-func (s *sequence) Run(_ context.Context, _ engine.Job) (engine.Result, error) {
+func (s *sequence) Prepare(context.Context, engine.Job) (engine.Program, error) { return s, nil }
+
+func (s *sequence) Run(_ context.Context, _ string) (engine.Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := s.results[0]
 	s.results = s.results[1:]
 	return r, nil
 }
+
+func (s *sequence) Close() {}
 
 func javaJob(t *testing.T, runs ...map[string]any) JudgeJob {
 	t.Helper()
@@ -78,6 +84,8 @@ func TestANamedRunThatFailsSaysWhyAndWhere(t *testing.T) {
 			&Failure{Name: ptr("Test 3"), Message: ptr("compile error: error: ';' expected"), Line: ptr(int64(7))}},
 		{"a time limit", run("Test 4"), engine.Result{Verdict: engine.TimeLimit},
 			&Failure{Name: ptr("Test 4"), Message: ptr("time limit: it ran too long")}},
+		{"a compile time limit", run("Test 6"), engine.Result{Verdict: engine.CompileTimeLimit, Stderr: "partial warnings\n"},
+			&Failure{Name: ptr("Test 6"), Message: ptr("compile time limit: it took too long to compile")}},
 		{"passed", run("Test 5"), ok(first + `{"call":1,"value":1}` + "\n"), nil},
 		{"hidden, a wrong value", run(""), ok(first + `{"call":1,"value":2}` + "\n"), nil},
 		{"hidden, an error with a line", run(""), ok(first + `{"call":1,"error":"X","line":3}` + "\n"), nil},
@@ -136,3 +144,72 @@ func TestNoLineWithoutOnePlayersFile(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// once is a sandbox that counts its compiles, runs and closes; each run gets verdict.
+type once struct {
+	mu                   sync.Mutex
+	prepared, ran, close int
+	verdict              engine.Verdict
+	err                  error
+}
+
+func (o *once) Prepare(context.Context, engine.Job) (engine.Program, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.prepared++
+	return o, o.err
+}
+
+func (o *once) Run(context.Context, string) (engine.Result, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.ran++
+	return engine.Result{Verdict: o.verdict}, nil
+}
+
+func (o *once) Close() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.close++
+}
+
+// Owner, 2026-11-26: a job is compiled once for all its runs, and closed when done.
+func TestAJobIsPreparedOnceForAllItsRuns(t *testing.T) {
+	o := &once{verdict: engine.CompileTimeLimit}
+	w := &Worker{Runner: o, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	got := w.process(context.Background(), javaJob(t, run("Test 1"), run(""), run("")))
+	if err := got.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if o.prepared != 1 || o.ran != 3 || o.close != 1 {
+		t.Fatalf("prepared %d, ran %d, closed %d", o.prepared, o.ran, o.close)
+	}
+	for i, r := range got.Runs {
+		if *r.Verdict != "compile_time_limit" || *r.Report.Passed {
+			t.Errorf("run %d: %s", i, *r.Verdict)
+		}
+	}
+	if f := got.Runs[0].Failure; f == nil || *f.Message != "compile time limit: it took too long to compile" {
+		t.Errorf("%+v", f)
+	}
+
+	broken := &once{err: errors.New("docker is down")}
+	w.Runner = broken
+	got = w.process(context.Background(), javaJob(t, run("")))
+	if *got.Status != "failed" || broken.ran != 0 {
+		t.Fatalf("%+v ran %d", got, broken.ran)
+	}
+}
+
+// A job's lease covers its compile, once, and each of its runs.
+func TestALeaseCoversTheCompileOnceAndEveryRun(t *testing.T) {
+	java := javaJob(t, run(""), run(""), run(""))
+	if got, want := budget(java), 3*(2*time.Second+perRunMargin)+15*time.Second+perRunMargin; got != want {
+		t.Errorf("java: %s, want %s", got, want)
+	}
+	python := java
+	python.Language = ptr("python")
+	if got, want := budget(python), 3*(2*time.Second+perRunMargin); got != want {
+		t.Errorf("python: %s, want %s", got, want)
+	}
+}

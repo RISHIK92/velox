@@ -24,8 +24,9 @@ import (
 // code; a fault storing the result keeps the lease, so the reaper hands the job on.
 
 // Runner is the sandbox (engine.Runner), a port so the queue logic is tested without it.
+// A job is prepared (compiled) once, then each of its runs is run against that.
 type Runner interface {
-	Run(ctx context.Context, job engine.Job) (engine.Result, error)
+	Prepare(ctx context.Context, job engine.Job) (engine.Program, error)
 }
 
 // Bounds on what a job may cost a worker, whoever submitted it.
@@ -36,7 +37,8 @@ const (
 	maxError          = 500
 	// Polled while idle: under the 10 s verdict target by a wide margin.
 	idlePoll = 200 * time.Millisecond
-	// A job's time beyond its runs' limits: starting, compiling, removing containers.
+	// A job's time beyond its compile's and its runs' limits: starting and removing
+	// containers, unpacking the compiled program.
 	perRunMargin = 30 * time.Second
 )
 
@@ -135,9 +137,7 @@ func (w *Worker) handle(ctx context.Context, kind string, raw []byte, priority, 
 		}
 	}
 	if result.Status == nil {
-		// Its own lease, from what it may take: every run at its limit, with a margin.
-		budget := time.Duration(len(job.Runs)) * (time.Duration(*job.Limits.Seconds)*time.Second + perRunMargin)
-		if _, err := w.Store.Extend(ctx, id, owner, time.Now().Add(budget)); err != nil {
+		if _, err := w.Store.Extend(ctx, id, owner, time.Now().Add(budget(job))); err != nil {
 			w.Log.Error("judge: extend", "id", id, "error", err)
 		}
 		result = w.process(ctx, job)
@@ -178,6 +178,16 @@ func (w *Worker) handle(ctx context.Context, kind string, raw []byte, priority, 
 		"status", *result.Status, "queueMs", queued, "runMs", time.Since(claimed).Milliseconds())
 }
 
+// budget is a job's own lease, from what it may take: its one compile and every run at
+// their limits, each with a margin.
+func budget(job JudgeJob) time.Duration {
+	b := time.Duration(len(job.Runs)) * (time.Duration(*job.Limits.Seconds)*time.Second + perRunMargin)
+	if lang, ok := engine.Lookup(*job.Language); ok && lang.Compile != "" {
+		b += time.Duration(lang.CompileSeconds)*time.Second + perRunMargin
+	}
+	return b
+}
+
 func failed(id, why string) JudgeResult {
 	status := "failed"
 	if len(why) > maxError {
@@ -197,11 +207,18 @@ func (w *Worker) process(ctx context.Context, job JudgeJob) JudgeResult {
 		Seconds:  int(*job.Limits.Seconds),
 		CPUs:     1, Pids: 64, TmpMB: 64, OutputKB: 1024,
 	}
+	// Compiled once for all its runs (owner, 2026-11-26); code that didn't compile gives
+	// every run its compile verdict, none of them run.
+	program, err := w.Runner.Prepare(ctx, engine.Job{Language: *job.Language, Files: files, Limits: limits})
+	if err != nil {
+		return failed(id, fmt.Sprintf("preparing: the engine: %v", err))
+	}
+	defer program.Close()
 	out := []RunResult{}
 	returned := 0
 	player := playersFile(*job.Language, files)
 	for i, run := range job.Runs {
-		res, err := w.Runner.Run(ctx, engine.Job{Language: *job.Language, Files: files, Stdin: *run.Stdin, Limits: limits})
+		res, err := program.Run(ctx, *run.Stdin)
 		if err != nil {
 			return failed(id, fmt.Sprintf("run %d: the engine: %v", i, err))
 		}

@@ -195,3 +195,31 @@ public class Main { public static void main(String[] a) { List<byte[]> h = new A
 	}
 	leftovers(t, r)
 }
+
+// Owner, 2026-11-26: a compiled job compiles once and each run uses that program; a
+// compile past its budget is its own verdict, and nothing runs.
+func TestACompiledJobCompilesOnceForAllItsRuns(t *testing.T) {
+	r := runner(t)
+	p, err := r.Prepare(context.Background(), Job{Language: "cpp", Limits: small, Files: map[string]string{"main.cpp": `#include <iostream>
+int main() { std::cout << std::cin.rdbuf(); }`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stdin := range []string{"one", "two"} {
+		got, err := p.Run(context.Background(), stdin)
+		if err != nil || got.Verdict != OK || got.Stdout != stdin {
+			t.Fatalf("%v %+v", err, got)
+		}
+	}
+	p.Close()
+	leftovers(t, r)
+
+	budget(t, "cpp", 1)
+	// <regex> takes seconds to compile on one CPU.
+	got, err := r.Run(context.Background(), Job{Language: "cpp", Limits: small, Files: map[string]string{"main.cpp": `#include <regex>
+int main() { return std::regex_match("ab", std::regex("a(b|c)*")) ? 0 : 1; }`}})
+	if err != nil || got.Verdict != CompileTimeLimit {
+		t.Fatalf("%v %+v", err, got)
+	}
+	leftovers(t, r)
+}

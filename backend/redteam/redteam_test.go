@@ -92,15 +92,21 @@ func (w weakEngine) Run(ctx context.Context, language, source, stdin string) (Ou
 	if err := os.WriteFile(filepath.Join(run, lang.Main), []byte(source), 0o644); err != nil {
 		return Outcome{}, err
 	}
-	args := append([]string{"run", "--rm", "-i", "--user", "65534:65534", "-v", run + ":/code:ro", lang.Image}, lang.Cmd(Limits.MemoryMB)...)
+	// One container, compiling and then running from its own /tmp: none of the engine's
+	// separation either.
+	script := lang.RunCmd(Limits.MemoryMB)[2]
+	if lang.Compile != "" {
+		script = "{ mkdir -p /tmp/out && " + lang.Compile + "; } </dev/null >&2 || exit 1; " +
+			strings.ReplaceAll(script, "/build", "/tmp/out")
+	}
+	args := []string{"run", "--rm", "-i", "--user", "65534:65534", "-v", run + ":/code:ro", lang.Image, "sh", "-c", script}
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdin = strings.NewReader(stdin)
 	out, err := cmd.Output()
 	if err != nil {
 		return Outcome{}, err
 	}
-	// A compiled language's READY line, as the engine strips it.
-	return Outcome{Verdict: ok, Stdout: strings.TrimPrefix(string(out), "\x1eREADY\n")}, nil
+	return Outcome{Verdict: ok, Stdout: string(out)}, nil
 }
 
 func TestTheAttacksCatchAWeakSandbox(t *testing.T) {

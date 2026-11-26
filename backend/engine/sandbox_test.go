@@ -63,24 +63,31 @@ func TestEveryIsolationRuleIsOnTheContainer(t *testing.T) {
 }
 
 func TestOnlyItsOwnRunDirIsMountedReadOnlyAndNoEnvironmentPasses(t *testing.T) {
-	args := spec().createArgs("")
-	mounts := 0
-	for i, a := range args {
-		if a == "-v" || a == "--volume" || a == "--mount" {
-			mounts++
-			if args[i+1] != "/work/run-1:/code:ro" {
-				t.Errorf("mount %q", args[i+1])
+	built := spec()
+	built.BuildDir = "/work/job-1/build"
+	for name, c := range map[string]struct {
+		spec   Spec
+		mounts []string
+	}{
+		"interpreted, or a compile": {spec(), []string{"/work/run-1:/code:ro"}},
+		"a compiled program's run":  {built, []string{"/work/run-1:/code:ro", "/work/job-1/build:/build:ro"}},
+	} {
+		args := c.spec.createArgs("")
+		var mounts []string
+		for i, a := range args {
+			if a == "-v" || a == "--volume" || a == "--mount" {
+				mounts = append(mounts, args[i+1])
+			}
+			if a == "-e" || a == "--env" || strings.HasPrefix(a, "--env=") {
+				t.Errorf("%s: an environment variable is passed: %q", name, args)
+			}
+			if a == "--privileged" || strings.HasPrefix(a, "--cap-add") {
+				t.Errorf("%s: privilege added: %q", name, a)
 			}
 		}
-		if a == "-e" || a == "--env" || strings.HasPrefix(a, "--env=") {
-			t.Errorf("an environment variable is passed: %q", args)
+		if !slices.Equal(mounts, c.mounts) {
+			t.Errorf("%s: mounts %q, want %q", name, mounts, c.mounts)
 		}
-		if a == "--privileged" || strings.HasPrefix(a, "--cap-add") {
-			t.Errorf("privilege added: %q", a)
-		}
-	}
-	if mounts != 1 {
-		t.Errorf("want exactly one mount, got %d", mounts)
 	}
 }
 
@@ -139,8 +146,7 @@ func TestTheFirstLimitHitIsTheVerdict(t *testing.T) {
 		want Verdict
 	}{
 		{outcome{output: true, timedOut: true, oom: true, exit: 137}, OutputLimit},
-		{outcome{timedOut: true, notCompiled: true, oom: true, exit: 137}, TimeLimit},
-		{outcome{notCompiled: true, oom: true, exit: 1}, CompileError},
+		{outcome{timedOut: true, oom: true, exit: 137}, TimeLimit},
 		{outcome{oom: true, exit: 137}, MemoryLimit},
 		{outcome{exit: 1}, RuntimeError},
 		{outcome{}, OK},
@@ -152,31 +158,51 @@ func TestTheFirstLimitHitIsTheVerdict(t *testing.T) {
 	}
 }
 
-func TestEveryLanguageIsListedAndCompiledOnesSayReady(t *testing.T) {
+// Owner, 2026-11-26: a compiled language compiles in a container of its own, with its
+// own budget, and sends its program out as a tar; each run reads it from /build.
+func TestEveryLanguageIsListedAndCompiledOnesCompileApart(t *testing.T) {
 	if len(Names()) != len(languages) {
 		t.Fatalf("Names has %d, the table %d", len(Names()), len(languages))
 	}
+	budgets := map[string]int{"python": 0, "javascript": 0, "typescript": 0, "java": 15, "cpp": 15, "go": 20}
 	for _, name := range Names() {
 		l, ok := Lookup(name)
 		if !ok {
 			t.Fatalf("%s isn't in the table", name)
 		}
-		script := l.Cmd(200)[2]
-		if l.Compile != "" && !strings.Contains(script, "printf '"+readyShell+"'") {
-			t.Errorf("%s: no READY: %s", name, script)
+		if l.CompileSeconds != budgets[name] {
+			t.Errorf("%s: a compile budget of %d s, want %d", name, l.CompileSeconds, budgets[name])
 		}
-		if l.Compile != "" && !strings.Contains(script, "</dev/null") {
+		run := l.RunCmd(200)[2]
+		if strings.Contains(run, "%!") || strings.Contains(run, "%d") || strings.Contains(run, "/tmp/") {
+			t.Errorf("%s: run %s", name, run)
+		}
+		if l.Compile == "" {
+			if strings.Contains(run, buildDir) {
+				t.Errorf("%s: reads a program it never compiled: %s", name, run)
+			}
+			continue
+		}
+		script := l.compileCmd()[2]
+		if !strings.Contains(script, "</dev/null") {
 			t.Errorf("%s: the compiler can read the job's stdin", name)
 		}
-		if strings.Contains(script, "%!") || strings.Contains(script, "%d") {
-			t.Errorf("%s: unformatted: %s", name, script)
+		// Only the tar reaches stdout: the compiler's own output goes to stderr.
+		if !strings.Contains(script, "} </dev/null >&2 || exit 1; cd "+compileOut+" && exec tar -cf - .") {
+			t.Errorf("%s: compile %s", name, script)
+		}
+		if !strings.Contains(l.Compile, compileOut) || !strings.Contains(run, buildDir) {
+			t.Errorf("%s: compiles to %s, runs %s", name, l.Compile, run)
+		}
+		if c := l.compiling(Limits{MemoryMB: 64, TmpMB: 8, Seconds: 2}); c.Seconds != l.CompileSeconds || c.MemoryMB != 64+l.Overhead.MemoryMB {
+			t.Errorf("%s: compiles within %+v", name, c)
+		}
+		if r := l.with(Limits{MemoryMB: 64, TmpMB: 8, Seconds: 2}); r.Seconds != 2 {
+			t.Errorf("%s: a run's limit isn't the job's: %+v", name, r)
 		}
 	}
-	if ready != "\x1eREADY\n" || readyShell != `\036READY\n` {
-		t.Error("the marker's two spellings differ")
-	}
 	java, _ := Lookup("java")
-	if !strings.Contains(java.Cmd(200)[2], "-Xmx200m") {
+	if !strings.Contains(java.RunCmd(200)[2], "-Xmx200m") {
 		t.Error("the JVM's heap isn't the job's memory")
 	}
 }

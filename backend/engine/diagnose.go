@@ -11,9 +11,10 @@ import (
 // player's prints too), so this is never asked for a hidden test (LLDQ-4).
 
 var verdictWords = map[Verdict]string{
-	TimeLimit:   "time limit: it ran too long",
-	MemoryLimit: "memory limit: it ran out of memory",
-	OutputLimit: "output limit: it printed too much",
+	TimeLimit:        "time limit: it ran too long",
+	MemoryLimit:      "memory limit: it ran out of memory",
+	OutputLimit:      "output limit: it printed too much",
+	CompileTimeLimit: "compile time limit: it took too long to compile",
 }
 
 // Where a toolchain names a line of a file: Python's traceback lists the innermost frame
